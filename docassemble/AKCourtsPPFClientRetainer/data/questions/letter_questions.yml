@@ -1,0 +1,29 @@
+---
+code: |
+  saluations = ["Mr.","Ms.","Mrs.","Mx.","Dr.","Sr.","Sra.","Custom"]
+---
+code: |
+  gendered_salutation_guess = salutation(client)
+---
+# if: not defined(client.preferred_saluation) or client.preferred_salutation in salutations
+question: |
+  How do you want to greet ${client}?
+fields:
+  - Greeting: client.preferred_greeting
+    default: Dear
+  - Honorific/Salutation: client.preferred_salutation
+    code: salutations
+    default: gendered_salutation_guess
+    show if:
+      code: |
+        not defined('client.preferred_salutation')
+  - Other: client.preferred_salutation
+    show if: 
+      variable: client.preferred_salutation
+      is: "Custom"
+  - Other: client.preferred_salutation
+    show if:
+      code: |
+        defined('client.preferred_salutations')
+  - Remember for this client: save_client_settings
+    datatype: yesno

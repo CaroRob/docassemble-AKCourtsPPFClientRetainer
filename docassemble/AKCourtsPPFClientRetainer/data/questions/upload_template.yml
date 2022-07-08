@@ -1,0 +1,482 @@
+---
+metadata:
+  title: |
+    Get a client's signature
+  tags:
+    - everyone
+    - client signature
+---
+features:
+  question help button: True
+  use catchall: True
+---
+modules:
+  - docassemble.microsoftgraph.msgraph
+  - .scan_for_vars
+  #- .msgraph
+---
+objects:
+  - o365: MSGraphConnectionObject
+  - folders: DADict.using(object_type=LazyFileList, auto_gather=False)
+  - drive_contents: LazyFileList.using(auto_gather=False)  
+---
+mandatory: True
+objects:
+  - client: Individual
+  - client.address: Address
+  - spouse: Individual
+  - spouse.address: Address
+  - advocate: Individual
+  - advocate.address: Address
+  - pbadvocate: Individual
+  - pbadvocate.address: Address
+  - initiator: Individual
+  - initiator.address: Address
+---
+objects:
+  - household: HouseholdList.using(auto_gather=False,gathered=True)
+  - income: IncomeList.using(auto_gather=False,gathered=True)
+  - adverse_parties: DAList.using(object_type=Person,auto_gather=False,gathered=True)
+  - individuals: DAList.using(object_type=Individual, auto_gather=False,gathered=True)
+  - guardian: Individual
+---
+question: |
+  What is the client's legal problem?
+fields:
+  - Briefly describe the problem that GBLS will work on. : retainer_client_problem
+    datatype: area
+---
+code: |
+  if url_args.get('lang', None) == 'es':
+    user_language = 'es'
+  else:
+    user_language = 'en'
+---
+initial: True
+code: |
+  set_language(user_language)
+---
+translations:
+  - upload_template_en_es.xlsx  
+---
+generic object: DACatchAll
+question: |
+  What is ${ x.object_name() }?
+fields:
+  - no label: x.value
+validation code: |
+  define(x.instanceName, x.value)
+---
+if: |
+  x.context == 'float'
+generic object: DACatchAll
+question: |
+  How much is ${ x.object_name() }?
+fields:
+  - Amount: x.value
+    datatype: currency
+validation code: |
+  define(x.instanceName, x.value)
+---
+if: |
+  x.data_type_guess() == 'bool'
+generic object: DACatchAll
+question: |
+  ${x.object_name()}?
+yesno: x.value
+validation code: |
+  define(x.instanceName, x.value)
+---
+if: |
+  x.object_name().endswith('date')
+generic object: DACatchAll
+question: |
+  ${x.object_name()}?
+fields:
+  - Date: x.value
+    datatype: date
+validation code: |
+  define(x.instanceName, x.value)
+---
+include:   
+  - docassemble.gbls:basic-questions-gbls.yml
+---
+mandatory: True
+id: set signature placeholder
+code: |
+  if task_not_yet_performed('set signature'):
+    client.signature = '[Your signature here]'
+    guardian.signature = '[Guardian signature here]'
+    mark_task_as_performed('set signature')
+---
+code: |
+  status = 'advocate'
+---
+initial: True
+code: |
+  process_action()
+---
+event: switch_to_client
+code: |
+  if 'status' in action_arguments():
+    status = action_argument('status')
+---
+id: interview_order
+mandatory: True
+code: |
+  prevent_going_back()
+  multi_user = True
+  if file_type == 'existing':
+    load_file
+    the_file
+  else:
+    the_file
+  get_advocate_name
+  advocate.email
+  draft_letter
+  send_by_email
+  send_message
+  hold_advocate
+  if status == 'advocate':
+    wait_for_response
+  set_language(user_language)
+  is_client
+  client_approves
+  signature_reset
+  signed_file
+  send_to_advocate
+  download_forms
+---
+code: |
+  undefine('client.signature')
+  undefine('guardian.signature')
+  signature_reset = True
+---
+code: |
+  hold_advocate = True
+  prevent_going_back()
+---
+code: |
+  if file_type == 'existing':
+    the_file = sp_file.as_dafile()
+  load_file = True
+---
+question: |
+  Are you ${client}?
+subquestion: |
+  This link is meant to be used by ${client} to sign a document sent by their
+  legal aid advocate.
+  
+  Are you ${client}?
+sets: is_client  
+buttons: 
+  - Yes, I am ${client}: 
+      code: |
+        is_client = True
+  - No.: exit
+    url: https://www.gbls.org
+---
+code: |
+  if not defined('advocate.name.first'):
+    advocate.name.first = user_info().first_name
+    advocate.name.last = user_info().last_name
+  get_advocate_name = True
+---
+question: |
+  Are there any people who are named in the document?
+yesno: individuals.there_are_any
+---
+question: |
+  Is there anyone else?
+yesno: individuals.there_is_another
+---
+table: individuals.table
+rows: individuals
+columns:
+  - Variable: |
+      row_item.instanceName
+  - Name: |
+      row_item
+  - Contact info: |
+      showifdef('row_item.mobile_number') + ', ' + showifdef('row_item.email')
+edit:
+  - name.first
+---
+table: adverse_parties.table
+rows: adverse_parties
+columns:
+  - Variable: |
+      row_item.instanceName
+  - Name: |
+      row_item
+edit:
+  - name.text
+---
+code: |
+  drive_id = o365.get_drive_id("gblsma.sharepoint.com:/sites/helpdesk","Templates")
+  o365.get_files_in_folder("gblsma.sharepoint.com:/sites/helpdesk", "Templates", drive_id=drive_id, lazylist=drive_contents)
+  drive_contents.gathered = True
+  gathered_file_questions = True
+---
+decoration: pen-fancy
+question: |
+  Client Signature Tool
+subquestion: |
+  Send your client a document to sign. You can choose from a form that's already
+  part of the form library, or upload a new custom Microsoft Word file.
+
+  To get a client's signature, you just need to add the exact text 
+  `{{ client.signature }}` in the place where you want the signature to go. Click
+  **Help** to learn about more fields you can include.
+  
+  This tool is experimental. Please use at your own risk.
+fields:
+  - Language: user_language
+    choices:
+      - English: en
+      - Spanish: es
+    default: en
+  - no label: file_type
+    input type: radio
+    choices:
+      - Use existing form letter or template: existing
+      - Upload a new file: new
+  - Choose an existing template: sp_file
+    datatype: object
+    choices: drive_contents
+    show if:
+      variable: file_type
+      is: "existing"
+  - Upload a template file: the_file
+    show if: 
+      variable: file_type
+      is: "new"
+    datatype: file
+    accept: |
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document, application/pdf"    
+help: |
+  ### Collecting signatures
+  Edit your Word file and type something like `{{advocate.signature}}` on the line
+  in the file where you want the signature to appear.
+  
+  Like this: [FILE insert_signature.png]
+  
+  This tool knows about 4 kinds of people: 
+  `client`, `advocate`, `individuals[0..n]`
+  and `adverse_parties[0..n]`. (replace the number in the square brackets with any
+  number to get information about several people)
+    
+  Referring to the variable name on its own adds the name of the client/advocate/person
+  into the document. E.g., `{{client}}`. If you want to collect the signature, 
+  add `.signature` to the variable's name.
+  
+  ### Information collected about people
+  You can also refer to information about a person, such as their address. Usually you
+  will use something like `{{ client.address.on_one_line() }}` or `{{client.address_block() }}`.
+
+  ### Special fields
+  To help you get a signature on a retainer, we added two fields you can use in any
+  document: `{{ retainer_gbls_will }}` and `{{ retainer_client_costs }}`.
+  
+  You can also always use the special code `{{ today() }}` to make today's date
+  appear in your document.
+  
+  ### Fields from Legal Server
+  If you launch this interview from Legal Server, we'll gather as many of the fields
+  as we can. That also includes fields like `client.address_block()`, 
+  `client.phone_number`, `client.mobile_number`, `client.email`, and `client.birthdate`.
+  
+  Here is a full [list of the variables you can use from Legal Server](https://github.com/GBLS/docassemble-gbls/wiki/Available-Variable-Names).
+---
+question: |
+  What is your email address?
+subquestion: |
+  We'll send you a message at this address when your client has signed the forms.
+fields:
+  - no label: advocate.email
+---
+question: |
+  Retainer details
+subquestion: |
+  Give information here about what GBLS is promising to do for the guest.
+fields:
+  - GBLS will do the following: retainer_gbls_will
+    datatype: area
+  - Client will be responsible for the following costs: retainer_client_costs
+    datatype: area
+---
+field: review_people
+question: |
+  Review the people whose information will appear on the letter
+subquestion: |
+  The information below came from Legal Server.
+  Click the button next to the information if you need to edit it.
+review: 
+  - Client name:  client.name.first
+    button: |
+      The client's name is ${client}
+  - Client phone number: client.mobile_number
+    button: |
+      The client's mobile number is ${client.mobile_number}
+  - Client's email: client.email
+    button: |
+      ${client.email}
+  - Advocate: advocate.name.first
+    button: |
+      The advocate's name is ${advocate}
+  - Advocate's email: advocate.email
+    button: |
+      ${advocate.email}
+  - Case email: ls_fields.case_email
+    button: |
+      ${ls_fields.case_email}
+  - note: |
+      **Adverse Parties**
+      
+      ${adverse_parties.table}
+      
+      ${adverse_parties.add_action()}      
+---
+question: |
+  Ready to send out for a signature?
+subquestion: |
+  You can right-click and copy [the link to the interview](${interview_url_action('switch_to_client',status='client')}).
+  Or send by text/email by entering it below.
+fields:
+  - Send link via email?: send_by_email
+    default: True
+    datatype: yesno
+  - Send link via text message?: send_by_sms
+    default: True
+    datatype: yesno
+  - Email address: send_to_email
+    datatype: email
+    default: ${showifdef('client.email','')}
+    required: False
+    show if: send_by_email
+  - Phone number: send_to_phone
+    default: ${showifdef('client.mobile_number','')}
+    required: False
+    show if: send_by_sms
+---
+question: |
+  Legal Server Case Email Address
+fields:
+  - Case email address: ls_fields.case_email
+---
+code: |
+  if send_by_email and showifdef('send_to_email') and task_not_yet_performed('send email'):
+    send_email(to=send_to_email, template=client_signature_msg, task='send email')
+  if send_by_sms and showifdef('send_to_phone') and task_not_yet_performed('send sms'):
+    send_sms(to=send_to_phone, template=client_signature_msg, task='send sms')
+  send_message = True
+---
+code: |
+  if task_not_yet_performed('send advocate email'):
+    if hasattr(signed_file,'docx'):
+      send_email(to=advocate.email, template=send_to_advocate_msg, task='send advocate email', attachments=[signed_file.pdf,signed_file.docx])
+    else:
+      send_email(to=advocate.email, template=send_to_advocate_msg, task='send advocate email', attachments=[signed_file])
+  if defined('ls_fields.case_email') and task_not_yet_performed('send to legalserver'):
+    if hasattr(signed_file,'docx'):
+      send_email(to=ls_fields.case_email, template=send_to_advocate_msg, task='send to legalserver', attachments=[signed_file.pdf,signed_file.docx])
+    else:
+      send_email(to=ls_fields.case_email, template=send_to_advocate_msg, task='send to legalserver', attachments=[signed_file.pdf])
+  
+  send_to_advocate = True
+---
+decoration: pen-fancy
+question: |
+  Please review the document below
+subquestion: |
+  ${advocate} sent you this file for you to sign:
+  
+  ${pdf_concatenate(draft_letter)}
+  
+  Are you ready to sign it?
+yesno:  client_approves
+---
+template: client_signature_msg
+subject: |
+  ${advocate} sent you a document to sign
+content: |
+  ${advocate} from GBLS sent you a file that needs your signature. Please review
+  and sign it by clicking this link: ${interview_url_action('switch_to_client',status='client')}
+---
+template: send_to_advocate_msg
+subject: |
+  ${client} returned your document
+content: |
+  The file you wanted ${client} to sign is ready.
+  
+  We also sent a copy to the Legal Server casefile.
+---
+event: wait_for_response
+question: |
+  Okay, sit tight.
+subquestion: |
+  We sent the file to ${client} for review.
+---
+event: download_forms
+question: |
+  Here is your document.
+subquestion: |
+  We sent a copy to ${advocate}. You can also download this file for your records.
+  
+  ${signed_file}
+---  
+code: |
+  final_fields = get_multiple_fields(the_file)
+---
+code: |
+  undefinable = undefinable_fields(final_fields)
+---
+if: |
+  the_file.mimetype == 'application/pdf' if defined('the_file.mimetype') else the_file[0].mimetype=='application/pdf' if defined('the_file[0].mimetype') else False
+attachment:
+  name: The letter
+  filename: ${the_file[0].filename if defined('the_file[0].filename') else the_file.filename if defined('the_file.filename') else 'letter'}
+  variable name: signed_file
+  pdf template file:
+    code: |
+      the_file
+  code: |
+    pdf_fields
+---
+if: |
+  not the_file.mimetype == 'application/pdf' if defined('the_file.mimetype') else not the_file[0].mimetype=='application/pdf' if defined('the_file[0].mimetype') else True
+attachment:
+  name: The letter
+  filename: ${the_file[0].filename if defined('the_file[0].filename') else the_file.filename if defined('the_file.filename') else 'letter'}
+  variable name: signed_file
+  docx template file:
+    code: |
+      the_file    
+  valid formats:
+    - pdf
+    - docx
+---
+if: |
+  the_file.mimetype == 'application/pdf' if defined('the_file.mimetype') else the_file[0].mimetype=='application/pdf' if defined('the_file[0].mimetype') else False
+attachment:
+  name: Your letter
+  filename: letter
+  variable name: draft_letter
+  pdf template file:
+    code: |
+      the_file
+  code: |
+    pdf_fields
+---
+if: |
+  not the_file.mimetype == 'application/pdf' if defined('the_file.mimetype') else not the_file[0].mimetype=='application/pdf' if defined('the_file[0].mimetype') else True
+attachment:
+  name: Your letter
+  filename: letter
+  variable name: draft_letter
+  docx template file:
+    code: |
+      the_file    
+  valid formats:
+    - pdf
+    - docx

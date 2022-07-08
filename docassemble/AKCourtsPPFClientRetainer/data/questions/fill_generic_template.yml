@@ -1,0 +1,298 @@
+---
+metadata:
+  title: |
+    Generate client documents
+  tags: 
+    - everyone    
+---
+features:
+  question help button: True
+  use catchall: True
+---
+modules:
+  - docassemble.microsoftgraph.msgraph
+  - .scan_for_vars
+  - .greetings
+---
+generic object: DACatchAll
+question: |
+  What is ${ x.object_name() }?
+fields:
+  - no label: x.value
+validation code: |
+  define(x.instanceName, x.value)
+---
+if: |
+  x.context == 'float'
+generic object: DACatchAll
+question: |
+  How much is ${ x.object_name() }?
+fields:
+  - Amount: x.value
+    datatype: currency
+validation code: |
+  define(x.instanceName, x.value)
+---
+if: |
+  x.data_type_guess() == 'bool'
+generic object: DACatchAll
+question: |
+  ${x.object_name()}?
+yesno: x.value
+validation code: |
+  define(x.instanceName, x.value)
+---
+if: |
+  x.object_name().endswith('date')
+generic object: DACatchAll
+question: |
+  ${x.object_name()}?
+fields:
+  - Date: x.value
+    datatype: date
+validation code: |
+  define(x.instanceName, x.value)
+---
+include:   
+  - docassemble.gbls:basic-questions-gbls.yml  
+  - template_questions.yml
+  - letter_questions.yml
+  - court_questions.yml 
+---
+objects:
+  - o365: MSGraphConnectionObject
+  - folders: DADict.using(object_type=LazyFileList, auto_gather=False)
+  - drive_contents: LazyFileList.using(auto_gather=False)
+  - ouser: Individual # placeholder object for values from Office 365
+---
+default screen parts:
+  under: |
+    [Edit your settings](${url_action('review_settings')})
+---
+mandatory: True
+code: |
+  # Initialize the objects that will be answered by generic questions so they can be accurately tested for 
+  # answerability. Docassemble is lazy about this, but it has limited/no performance impact.
+  # If we don't initialize, Docassemble doesn't know if the question can be answered.
+  preferences
+  ouser  
+  client
+  household
+  children
+  advocate
+  adverse_parties
+  income
+--- 
+id: question order
+mandatory: True  
+code: |
+  if not user_logged_in():
+    not_signed_in
+  ls_fields
+  if defined('advocate.email') or user_info().email:
+    # log(o365.get_user(advocate.email))
+    load_ouser_from_office365
+    try_setting_prefs_from_advocate
+  sp_files 
+  the_files
+  final_fields
+  # show_fields
+  if signature_choice == 'paper':
+    set_signatures_empty
+  #gather_fields(final_fields, exclude=undefinable)   # gather_fields(final_fields) #, exclude=['client.signature','guardian.signature'])
+  gather_fields(final_fields) # lets try with catchall
+  #undefined_field_question
+  #show_undefined_fields
+  #if len(undefinable) > 0:
+  #  gather_leftover_fields
+  if send_documents_to_ls:
+    send_to_legal_server
+  download_attachments
+---
+sets:
+  - ouser.phone_number
+  - ouser.jobTitle
+id: office365
+code: |
+  # We can load two fields from Office 365: job title and phone number
+  # We shouldn't overwrite the user's preference if those already exist.
+  if defined('advocate.email'):
+    o365.get_user(advocate.email, ouser)
+  else:
+    o365.get_user(user_info().email, ouser)
+  load_ouser_from_office365=True
+---
+# scan for variables: False
+code: |
+  # Fill-in information in the advocate in priority order.
+  # Highest priority is given to the current value in DAStore('prefs')
+
+  if not defined('preferences.title') or preferences.title == '' or preferences.title is None:
+    preferences.jobTitle = ouser.jobTitle
+  if not defined('preferences.phone_number') or preferences.phone_number == '' or preferences.phone_number is None:
+    if defined('ouser.phone_number'):
+      preferences.phone_number = ouser.phone_number
+    else:
+      preferences.phone_number = ''
+  if not defined('preferences.department') or preferences.department == '' or preferences.department is None:
+    if defined('ouser.department'):
+      preferences.department = ouser.department
+    elif defined('advocate.program'): # this is the value from Legal Server, which may or may not be a good guess
+      preferences.department = advocate.program
+    else:
+      preferences.department = ''
+  if not defined('preferences.fax_number') or preferences.fax_number =='' or preferences.fax_number is None:
+    if defined('ouser.fax_number'):
+      preferences.fax_number = ouser.fax_number
+    else:
+      preferences.fax_number = ''
+  # save_to_database # store the phone/jobTitle/department fields in preferences
+  
+  advocate.jobTitle = preferences.jobTitle
+  advocate.phone_number  = preferences.phone_number
+  advocate.department = preferences.department
+  advocate.address = ouser.address
+
+  try_setting_prefs_from_advocate = True 
+---
+comment: |
+  Load fields from all of the templates
+code: |
+  final_fields = get_multiple_fields(the_files)
+---
+code: |
+  undefinable = undefinable_fields(final_fields)
+---
+code: |
+  client.signature = DAEmpty()
+  set_signatures_empty = True
+---
+question: Test
+fields:
+    - test field: test_field  
+---
+field: show_undefined_fields
+question: |
+
+  ${undefinable}}
+---
+code: |
+  the_files = DAList('the_files', object_type = DAObject, elements=[sp_file.as_dafile() for sp_file in sp_files])
+---
+code: |
+  drive_id = o365.get_drive_id("gblsma.sharepoint.com:/sites/helpdesk","Basic_Templates")
+  # gather drive_contents
+  o365.get_files_in_folder("gblsma.sharepoint.com:/sites/helpdesk", "Basic_Templates", drive_id=drive_id, lazylist=drive_contents)
+  drive_contents.gathered = True
+  gathered_file_questions = True
+---
+event: not_signed_in
+question: |
+  Please sign-in
+subquestion: |
+  You need to sign-in to use this interview.
+
+  ${action_button_html(get_config('url root') + '/authorize/azure',label="Sign-in with your GBLS account", color='primary',icon='sign-in-alt')}
+under: |
+    
+---
+id: select a template
+question: |
+  Select the template(s) you want to use
+subquestion: |
+  ${raw}  
+fields:
+  - Template: sp_files
+    datatype: object_checkboxes
+    choices: drive_contents
+    none of the above: False
+    minlength: 1
+  - Get the client's signature: signature_choice
+    datatype: radio
+    choices:
+      - Digitally: digital
+        help: |
+          Note that this will work only if the template includes a signature field
+      - On paper: paper
+    default: digital
+  - Send documents to Legal Server: send_documents_to_ls
+    datatype: yesno
+---
+code: |
+  # ask this separately so we know
+  undefined_field_question = undefinable_fields_code(final_fields)  
+---
+question: |
+  Remaining questions
+subquestion: |
+  Provide an answer for each field below.  
+fields:
+  - code: |
+      undefinable_fields_code(final_fields)
+continue button field: gather_leftover_fields
+---
+if: |
+  not the_files[i].mimetype == 'application/pdf'
+attachment:
+  name: ${the_files[i].filename.rsplit('.', 1)[0]}
+  filename: ${the_files[i].filename.rsplit('.', 1)[0]}
+  variable name: the_files[i].attachment
+  docx template file:
+    code: |
+     the_files[i]
+---
+if: |
+  the_files[i].mimetype == 'application/pdf'
+attachment:
+  name: ${the_files[i].filename.rsplit('.', 1)[0]}
+  filename: ${the_files[i].filename.rsplit('.', 1)[0]}
+  variable name: the_files[i].attachment
+  pdf template file:
+    code: |
+      the_files[i]
+  code: |
+    pdf_fields_code(final_fields)
+---
+event: download_attachments
+question: |
+  Your documents are ready
+subquestion: |
+  % if send_documents_to_ls:
+  We also sent a copy of the documents below to the Legal Server
+  case file.
+  % endif
+
+  %for item in the_files:
+  ##### ${item.filename}
+  ${pdf_concatenate(item.attachment).show(width="1in")}
+
+  [:file-word: Download Microsoft Word file](${item.attachment.docx.url_for()})
+
+  %endfor
+  ##### :download: Other download options
+  * [:file-pdf: Download all files as a PDF](${pdf_concatenate([item.attachment for item in the_files]).url_for()})
+  * [:file-archive: Download all editable files as a Zip](${zip_file([item.attachment.docx for item in the_files]).url_for()})
+buttons:
+  - Exit: exit
+under: |
+     
+---
+comment: |
+  Debugging
+event: show_fields
+question: |
+  The fields
+subquestion: |
+  ${final_fields}
+
+---
+template: send_to_legal_server_msg
+subject: |
+  Documents generated by ${advocate} on ${today()} for ${ls_fields['id']}
+content: |
+  Here are the documents you created for ${client}'s case
+---
+code: |
+  if defined('ls_fields.case_email') and task_not_yet_performed('send to legalserver'):
+    send_email(to=ls_fields.case_email,template=send_to_legal_server_msg,task='send to legalserver', attachments=[item.attachment.docx for item in the_files])
+  send_to_legal_server = True

@@ -1,0 +1,7 @@
+---
+include: 
+  - template_questions.yml
+---
+mandatory: True
+code: |
+  review_settings

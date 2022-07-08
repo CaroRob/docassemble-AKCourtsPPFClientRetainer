@@ -1,0 +1,65 @@
+---
+modules: 
+  - docassemble.MACourts.macourts
+---
+objects:
+  - macourts: MACourtList.using(courts=['district_courts', 'housing_courts','bmc','superior_courts','land_court','juvenile_courts','probate_and_family_courts'])
+  #- initiator: DAList.using(auto_gather=False, gathered=True)
+  #- defender: DAList.using(auto_gather=False, gathered=True)
+  - initiating_party_other: Person
+  - defending_party_other: Person
+---
+code: |
+  potential_parties = adverse_parties + household + [client]
+---
+question: |
+  Court Pleading
+subquestion: |
+  The information below will be used to generate the 
+  case caption.
+fields:
+  - Court name: court
+    datatype: object
+    choices: macourts
+  - Pleading title (e.g., Motion to Dismiss): pleading_title
+    required: False
+  - Party labels: party_labels
+    datatype: radio
+    default: plaintiff
+    choices:
+      - Petitioner/Respondent: petitioner
+      - Plaintiff/Defendant: plaintiff
+  - Name of petitioners/plaintiffs: initiating_party
+    datatype: object_checkboxes
+    choices: potential_parties
+    none of the above: True
+    #disable others: 
+    #  - initiator_other
+  - Other: initiating_party_other.name.text
+    required: False
+  - Name of respondents/defendants: defending_party
+    none of the above: True
+    datatype: object_checkboxes
+    choices: potential_parties
+    #disable others:
+    #  - defender_other
+  - Other: defending_party_other.name.text
+    required: False
+---
+code: |
+  if party_labels == 'petitioner':
+    initiating_party_label = 'Petitioner'
+    defending_party_label = 'Respondent'
+  else:
+    initiating_party_label = 'Plaintiff'
+    defending_party_label = 'Defendant'
+  if not defined('initiating_party') and len('initiating_party_other') > 0:
+    #initiator = DAList(auto_gather=False)
+    #initiator.add(initiator_other)
+    #initiator.gathered=True
+    initiating_party = initiating_party_other
+  if not defined('defending_party') and len('defending_party_other') > 0:
+    #initiator = DAList(auto_gather=False)
+    #defender.add(defender_other)
+    #defender.gathered=True
+    defending_party = defending_party_other
